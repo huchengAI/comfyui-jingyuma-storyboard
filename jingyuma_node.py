@@ -68,7 +68,7 @@ def _save_to_cache(key: str, result):
     _CACHE[key] = (time.time(), result)
 
 
-def _call_generate_api(api_key: str, text: str, mode: str = "theme",
+def _call_generate_api(api_key: str, text: str, mode: str = "basic",
                        mood: str = "", theme: str = "") -> dict:
     """
     调用镜语马 /api/v1/generate 接口
@@ -190,8 +190,8 @@ class JingyumaStoryboardNode:
             },
             "optional": {
                 "mode": (["basic", "mood", "theme"], {
-                    "default": "theme",
-                    "tooltip": "basic=快速 / mood=情绪 / theme=题材（默认推荐 theme）",
+                    "default": "basic",
+                    "tooltip": "basic=快速（免费版可用）/ mood=情绪（需标准版）/ theme=题材（需专业版）",
                 }),
                 "mood": (MOOD_OPTIONS, {
                     "default": "（不指定）",
@@ -213,7 +213,7 @@ class JingyumaStoryboardNode:
     FUNCTION = "generate_storyboard"
     CATEGORY = "镜语马"
 
-    def generate_storyboard(self, text, api_key, mode="theme",
+    def generate_storyboard(self, text, api_key, mode="basic",
                             mood="（不指定）", theme="（自动检测）", use_cache=True):
         text = text.strip()
         api_key = api_key.strip()
