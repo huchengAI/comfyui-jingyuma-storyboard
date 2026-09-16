@@ -3,7 +3,7 @@ ComfyUI 镜语马分镜节点
 调用 https://shotstory.cn/api/v1/generate 将小说文本转换为分镜提示词
 
 作者：镜语马
-版本：1.0.0
+版本：1.0.1
 """
 
 import json
@@ -17,6 +17,28 @@ API_BASE_URL = "https://shotstory.cn"
 GENERATE_ENDPOINT = "/api/v1/generate"
 ROTATE_ENDPOINT = "/api/v1/rotate_variant"
 TIMEOUT = 120  # 秒
+
+# ==================== 下拉选项配置 ====================
+# 情绪模式可选值（与网站保持一致）
+MOOD_OPTIONS = [
+    "（不指定）",
+    "治愈温暖", "慵懒松弛", "热血激昂", "平静淡漠", "绝望崩溃",
+    "紧张恐惧", "孤独落寞", "愤怒暴躁", "悲伤压抑", "暧昧心动",
+]
+
+# 题材模式可选值（与网站保持一致）
+THEME_OPTIONS = [
+    "（自动检测）",
+    "穿越系统", "盗墓探险", "都市言情", "古风仙侠", "军事战争",
+    "科幻赛博", "历史权谋", "末日废土", "末世觉醒系统", "末世丧尸",
+    "热血玄幻", "田园乡土", "无限流副本", "武侠江湖", "西方奇幻",
+    "校园青春", "星际科幻", "悬疑惊悚", "游戏穿越", "政务校园",
+    "都市重生系统",
+]
+
+# 刷新节点的情绪/题材可选值（不允许"不指定"，必须选具体值）
+MOOD_OPTIONS_REQUIRED = [m for m in MOOD_OPTIONS if m != "（不指定）"]
+THEME_OPTIONS_REQUIRED = [t for t in THEME_OPTIONS if t != "（自动检测）"]
 
 # 简单的内存缓存（避免同一文本重复调用扣积分）
 # 结构：{cache_key: (timestamp, result)}
@@ -46,7 +68,7 @@ def _save_to_cache(key: str, result):
     _CACHE[key] = (time.time(), result)
 
 
-def _call_generate_api(api_key: str, text: str, mode: str = "basic",
+def _call_generate_api(api_key: str, text: str, mode: str = "theme",
                        mood: str = "", theme: str = "") -> dict:
     """
     调用镜语马 /api/v1/generate 接口
@@ -133,6 +155,7 @@ def _format_shots(shots: List[dict]) -> Tuple[str, str, str, str]:
             "duration": duration,
             "visual_description": visual,
             "is_violation": is_violation,
+            "review_token": shot.get("review_token", ""),
         })
 
     return (
@@ -167,16 +190,16 @@ class JingyumaStoryboardNode:
             },
             "optional": {
                 "mode": (["basic", "mood", "theme"], {
-                    "default": "basic",
-                    "tooltip": "basic=快速 / mood=情绪 / theme=题材",
+                    "default": "theme",
+                    "tooltip": "basic=快速 / mood=情绪 / theme=题材（默认推荐 theme）",
                 }),
-                "mood": ("STRING", {
-                    "default": "",
-                    "tooltip": "情绪模式时填写，如：热血激昂、孤独落寞",
+                "mood": (MOOD_OPTIONS, {
+                    "default": "（不指定）",
+                    "tooltip": "仅在 mode=mood 时生效",
                 }),
-                "theme": ("STRING", {
-                    "default": "",
-                    "tooltip": "题材模式时填写，如：古风仙侠、都市言情",
+                "theme": (THEME_OPTIONS, {
+                    "default": "（自动检测）",
+                    "tooltip": "仅在 mode=theme 时生效；选『自动检测』则由服务端识别题材",
                 }),
                 "use_cache": ("BOOLEAN", {
                     "default": True,
@@ -190,10 +213,16 @@ class JingyumaStoryboardNode:
     FUNCTION = "generate_storyboard"
     CATEGORY = "镜语马"
 
-    def generate_storyboard(self, text, api_key, mode="basic",
-                            mood="", theme="", use_cache=True):
+    def generate_storyboard(self, text, api_key, mode="theme",
+                            mood="（不指定）", theme="（自动检测）", use_cache=True):
         text = text.strip()
         api_key = api_key.strip()
+
+        # ===== 处理下拉框的"不指定"选项 =====
+        if mood in ("（不指定）", ""):
+            mood = ""
+        if theme in ("（自动检测）", ""):
+            theme = ""
 
         if not text:
             raise RuntimeError("❌ 输入文本为空")
@@ -211,7 +240,7 @@ class JingyumaStoryboardNode:
                 return _format_shots(cached)
 
         # 调用 API
-        print(f"🌐 [镜语马] 调用 API：mode={mode}, 文本长度={len(text)}")
+        print(f"🌐 [镜语马] 调用 API：mode={mode}, mood={mood}, theme={theme}, 文本长度={len(text)}")
         data = _call_generate_api(api_key, text, mode, mood, theme)
 
         shots = data.get("data", {}).get("shots", [])
@@ -303,11 +332,16 @@ class JingyumaRefreshShotNode:
                 }),
                 "mode": (["mood", "theme"], {
                     "default": "mood",
+                    "tooltip": "刷新必须指定 mood 或 theme，快速模式无刷新",
                 }),
-            },
-            "optional": {
-                "mood": ("STRING", {"default": "", "tooltip": "情绪模式时必填"}),
-                "theme": ("STRING", {"default": "", "tooltip": "题材模式时必填"}),
+                "mood": (MOOD_OPTIONS_REQUIRED, {
+                    "default": MOOD_OPTIONS_REQUIRED[0],
+                    "tooltip": "仅在 mode=mood 时生效",
+                }),
+                "theme": (THEME_OPTIONS_REQUIRED, {
+                    "default": THEME_OPTIONS_REQUIRED[0],
+                    "tooltip": "仅在 mode=theme 时生效",
+                }),
             },
         }
 
@@ -316,7 +350,8 @@ class JingyumaRefreshShotNode:
     FUNCTION = "refresh_shot"
     CATEGORY = "镜语马"
 
-    def refresh_shot(self, shot_text, api_key, mode="mood", mood="", theme=""):
+    def refresh_shot(self, shot_text, api_key, mode="mood",
+                     mood=MOOD_OPTIONS_REQUIRED[0], theme=THEME_OPTIONS_REQUIRED[0]):
         shot_text = shot_text.strip()
         api_key = api_key.strip()
 
