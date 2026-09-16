@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-jingyuma-storyboard"
-version = "1.0.0"
+version = "1.0.1"
 description = "ComfyUI 镜语马分镜节点：将小说/剧本自动拆解为标准化分镜提示词，一键接入生图/生视频工作流"
 readme = "README.md"
 license = "MIT"
