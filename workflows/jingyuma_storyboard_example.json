@@ -1,0 +1,89 @@
+{
+  "last_node_id": 2,
+  "last_link_id": 2,
+  "nodes": [
+    {
+      "id": 1,
+      "type": "JingyumaStoryboard",
+      "pos": [100, 100],
+      "size": [400, 320],
+      "flags": {},
+      "order": 0,
+      "mode": 0,
+      "inputs": [],
+      "outputs": [
+        {
+          "name": "image_prompts",
+          "type": "STRING",
+          "links": [1],
+          "slot_index": 0
+        },
+        {
+          "name": "video_prompts",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 1
+        },
+        {
+          "name": "dialogues",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 2
+        },
+        {
+          "name": "raw_json",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 3
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JingyumaStoryboard"
+      },
+      "widgets_values": [
+        "夜色如墨，他独自站在天台上，看着远处城市的灯火。心中涌起一阵难以言说的孤独。",
+        "",
+        "basic",
+        "",
+        "",
+        true
+      ]
+    },
+    {
+      "id": 2,
+      "type": "JingyumaSplitShots",
+      "pos": [560, 100],
+      "size": [320, 82],
+      "flags": {},
+      "order": 1,
+      "mode": 0,
+      "inputs": [
+        {
+          "name": "prompts",
+          "type": "STRING",
+          "link": 1
+        }
+      ],
+      "outputs": [
+        {
+          "name": "prompt",
+          "type": "STRING",
+          "links": null,
+          "slot_index": 0
+        }
+      ],
+      "properties": {
+        "Node name for S&R": "JingyumaSplitShots"
+      },
+      "widgets_values": [1]
+    }
+  ],
+  "links": [
+    [1, 1, 0, 2, 0, "STRING"]
+  ],
+  "groups": [],
+  "config": {},
+  "extra": {},
+  "version": 0.4
+}
+

@@ -1,0 +1,19 @@
+[project]
+name = "comfyui-jingyuma-storyboard"
+version = "1.0.0"
+description = "ComfyUI 镜语马分镜节点：将小说/剧本自动拆解为标准化分镜提示词，一键接入生图/生视频工作流"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.8"
+dependencies = [
+    "requests>=2.25.0",
+]
+
+[project.urls]
+Homepage = "https://shotstory.cn"
+Repository = "https://github.com/huchengAI/comfyui-jingyuma-storyboard"
+Issues = "https://github.com/huchengAI/comfyui-jingyuma-storyboard/issues"
+
+[tool.comfy]
+PublisherId = "huchengAI"
+DisplayName = "Jingyuma Storyboard"
