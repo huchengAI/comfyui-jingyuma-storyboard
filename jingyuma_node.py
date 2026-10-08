@@ -1,9 +1,9 @@
 """
-ComfyUI 镜语马分镜节点
-调用 https://shotstory.cn/api/v1/generate 将小说文本转换为分镜提示词
+ComfyUI Jingyuma Storyboard Nodes
+Calls https://shotstory.cn/api/v1/generate to convert novel text into storyboard prompts.
 
-作者：镜语马
-版本：1.0.1
+Author: Jingyuma
+Version: 1.0.2
 """
 
 import json
@@ -12,48 +12,113 @@ import hashlib
 import requests
 from typing import Tuple, List
 
-# ==================== 常量配置 ====================
+# ==================== Constants ====================
 API_BASE_URL = "https://shotstory.cn"
 GENERATE_ENDPOINT = "/api/v1/generate"
 ROTATE_ENDPOINT = "/api/v1/rotate_variant"
-TIMEOUT = 120  # 秒
+TIMEOUT = 120  # seconds
 
-# ==================== 下拉选项配置 ====================
-# 情绪模式可选值（与网站保持一致）
+# ==================== Dropdown options ====================
+# Display label (English) -> API value (Chinese, used by the server)
+
+# Mood mode options
 MOOD_OPTIONS = [
-    "（不指定）",
-    "治愈温暖", "慵懒松弛", "热血激昂", "平静淡漠", "绝望崩溃",
-    "紧张恐惧", "孤独落寞", "愤怒暴躁", "悲伤压抑", "暧昧心动",
+    "(not set)",
+    "Healing / Warm",
+    "Lazy / Relaxed",
+    "Passionate / Fiery",
+    "Calm / Detached",
+    "Despair / Breakdown",
+    "Tense / Fearful",
+    "Lonely / Melancholic",
+    "Angry / Irritable",
+    "Sad / Depressed",
+    "Ambiguous / Romantic",
 ]
 
-# 题材模式可选值（与网站保持一致）
+MOOD_MAP = {
+    "(not set)": "",
+    "Healing / Warm": "治愈温暖",
+    "Lazy / Relaxed": "慵懒松弛",
+    "Passionate / Fiery": "热血激昂",
+    "Calm / Detached": "平静淡漠",
+    "Despair / Breakdown": "绝望崩溃",
+    "Tense / Fearful": "紧张恐惧",
+    "Lonely / Melancholic": "孤独落寞",
+    "Angry / Irritable": "愤怒暴躁",
+    "Sad / Depressed": "悲伤压抑",
+    "Ambiguous / Romantic": "暧昧心动",
+}
+
+# Theme mode options
 THEME_OPTIONS = [
-    "（自动检测）",
-    "穿越系统", "盗墓探险", "都市言情", "古风仙侠", "军事战争",
-    "科幻赛博", "历史权谋", "末日废土", "末世觉醒系统", "末世丧尸",
-    "热血玄幻", "田园乡土", "无限流副本", "武侠江湖", "西方奇幻",
-    "校园青春", "星际科幻", "悬疑惊悚", "游戏穿越", "政务校园",
-    "都市重生系统",
+    "(auto detect)",
+    "Transmigration System",
+    "Tomb Raiding Adventure",
+    "Urban Romance",
+    "Ancient Xianxia",
+    "Military War",
+    "Sci-Fi Cyberpunk",
+    "Historical Political Intrigue",
+    "Post-Apocalyptic Wasteland",
+    "Apocalypse Awakening System",
+    "Apocalypse Zombie",
+    "Hot-Blooded Fantasy",
+    "Pastoral Rural",
+    "Infinite Flow Dungeon",
+    "Wuxia Jianghu",
+    "Western Fantasy",
+    "Campus Youth",
+    "Interstellar Sci-Fi",
+    "Suspense Thriller",
+    "Game Transmigration",
+    "Political Campus",
+    "Urban Rebirth System",
 ]
 
-# 刷新节点的情绪/题材可选值（不允许"不指定"，必须选具体值）
-MOOD_OPTIONS_REQUIRED = [m for m in MOOD_OPTIONS if m != "（不指定）"]
-THEME_OPTIONS_REQUIRED = [t for t in THEME_OPTIONS if t != "（自动检测）"]
+THEME_MAP = {
+    "(auto detect)": "",
+    "Transmigration System": "穿越系统",
+    "Tomb Raiding Adventure": "盗墓探险",
+    "Urban Romance": "都市言情",
+    "Ancient Xianxia": "古风仙侠",
+    "Military War": "军事战争",
+    "Sci-Fi Cyberpunk": "科幻赛博",
+    "Historical Political Intrigue": "历史权谋",
+    "Post-Apocalyptic Wasteland": "末日废土",
+    "Apocalypse Awakening System": "末世觉醒系统",
+    "Apocalypse Zombie": "末世丧尸",
+    "Hot-Blooded Fantasy": "热血玄幻",
+    "Pastoral Rural": "田园乡土",
+    "Infinite Flow Dungeon": "无限流副本",
+    "Wuxia Jianghu": "武侠江湖",
+    "Western Fantasy": "西方奇幻",
+    "Campus Youth": "校园青春",
+    "Interstellar Sci-Fi": "星际科幻",
+    "Suspense Thriller": "悬疑惊悚",
+    "Game Transmigration": "游戏穿越",
+    "Political Campus": "政务校园",
+    "Urban Rebirth System": "都市重生系统",
+}
 
-# 简单的内存缓存（避免同一文本重复调用扣积分）
-# 结构：{cache_key: (timestamp, result)}
+# Refresh node options (must pick a specific value, no "not set")
+MOOD_OPTIONS_REQUIRED = [m for m in MOOD_OPTIONS if m != "(not set)"]
+THEME_OPTIONS_REQUIRED = [t for t in THEME_OPTIONS if t != "(auto detect)"]
+
+# Simple in-memory cache (avoid duplicate API calls for same text)
+# Format: {cache_key: (timestamp, result)}
 _CACHE = {}
-_CACHE_TTL = 600  # 10 分钟
+_CACHE_TTL = 600  # 10 minutes
 
 
 def _make_cache_key(text: str, mode: str, mood: str, theme: str) -> str:
-    """生成缓存 key"""
+    """Build cache key."""
     raw = f"{text}|{mode}|{mood}|{theme}"
     return hashlib.md5(raw.encode("utf-8")).hexdigest()
 
 
 def _get_from_cache(key: str):
-    """从缓存读取"""
+    """Read from cache."""
     if key in _CACHE:
         ts, result = _CACHE[key]
         if time.time() - ts < _CACHE_TTL:
@@ -64,15 +129,15 @@ def _get_from_cache(key: str):
 
 
 def _save_to_cache(key: str, result):
-    """写入缓存"""
+    """Write to cache."""
     _CACHE[key] = (time.time(), result)
 
 
 def _call_generate_api(api_key: str, text: str, mode: str = "basic",
                        mood: str = "", theme: str = "") -> dict:
     """
-    调用镜语马 /api/v1/generate 接口
-    返回解析后的 dict（含 shots 数组）
+    Call Jingyuma /api/v1/generate endpoint.
+    Returns parsed dict containing 'shots' array.
     """
     url = API_BASE_URL + GENERATE_ENDPOINT
     headers = {
@@ -89,42 +154,42 @@ def _call_generate_api(api_key: str, text: str, mode: str = "basic",
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=TIMEOUT)
     except requests.exceptions.RequestException as e:
-        raise RuntimeError(f"❌ 请求镜语马 API 失败：{e}")
+        raise RuntimeError(f"Request to Jingyuma API failed: {e}")
 
-    # 解析 HTTP 状态码
+    # Handle HTTP status codes
     if resp.status_code == 401:
-        raise RuntimeError("❌ API Key 无效或缺失，请在镜语马官网获取正确的 Key")
+        raise RuntimeError("Invalid or missing API Key. Get yours at https://shotstory.cn")
     elif resp.status_code == 402:
-        raise RuntimeError("❌ 积分不足，请前往 https://shotstory.cn 充值或升级套餐")
+        raise RuntimeError("Insufficient credits. Top up or upgrade your plan at https://shotstory.cn")
     elif resp.status_code == 403:
         try:
-            err = resp.json().get("error", "无权限")
+            err = resp.json().get("error", "Forbidden")
         except Exception:
-            err = "无权限"
-        raise RuntimeError(f"❌ 权限拒绝：{err}")
+            err = "Forbidden"
+        raise RuntimeError(f"Permission denied: {err}")
     elif resp.status_code == 429:
-        raise RuntimeError("❌ 请求过于频繁，请稍后重试")
+        raise RuntimeError("Too many requests. Please try again later.")
     elif resp.status_code != 200:
-        raise RuntimeError(f"❌ API 返回错误 {resp.status_code}：{resp.text[:200]}")
+        raise RuntimeError(f"API error {resp.status_code}: {resp.text[:200]}")
 
-    # 解析业务响应
+    # Parse JSON body
     try:
         data = resp.json()
     except Exception:
-        raise RuntimeError(f"❌ 响应不是合法 JSON：{resp.text[:200]}")
+        raise RuntimeError(f"Response is not valid JSON: {resp.text[:200]}")
 
     if not data.get("success"):
-        error = data.get("error", "未知错误")
+        error = data.get("error", "Unknown error")
         code = data.get("code", "")
-        raise RuntimeError(f"❌ 镜语马 API 业务错误[{code}]：{error}")
+        raise RuntimeError(f"Jingyuma API error[{code}]: {error}")
 
     return data
 
 
 def _format_shots(shots: List[dict]) -> Tuple[str, str, str, str]:
     """
-    将 shots 数组格式化为 4 个输出字符串
-    返回：(image_prompts, video_prompts, dialogues, raw_json)
+    Format shots array into 4 output strings.
+    Returns: (image_prompts, video_prompts, dialogues, raw_json)
     """
     image_prompts = []
     video_prompts = []
@@ -140,13 +205,13 @@ def _format_shots(shots: List[dict]) -> Tuple[str, str, str, str]:
         is_violation = shot.get("is_violation", False)
 
         if is_violation:
-            image_prompts.append(f"[镜头 {idx:03d}] ⚠️ 内容违规，已屏蔽")
-            video_prompts.append(f"[镜头 {idx:03d}] ⚠️ 内容违规，已屏蔽")
-            dialogues.append(f"[镜头 {idx:03d}] (违规)")
+            image_prompts.append(f"[Shot {idx:03d}] Content blocked (violation)")
+            video_prompts.append(f"[Shot {idx:03d}] Content blocked (violation)")
+            dialogues.append(f"[Shot {idx:03d}] (violation)")
         else:
-            image_prompts.append(f"[镜头 {idx:03d}] {visual}")
-            video_prompts.append(f"[镜头 {idx:03d}] {visual}")
-            dialogues.append(f"[镜头 {idx:03d}] {dialogue if dialogue and dialogue != '无' else '(无台词)'}")
+            image_prompts.append(f"[Shot {idx:03d}] {visual}")
+            video_prompts.append(f"[Shot {idx:03d}] {visual}")
+            dialogues.append(f"[Shot {idx:03d}] {dialogue if dialogue and dialogue != '无' else '(no dialogue)'}")
 
         shot_info.append({
             "index": idx,
@@ -166,12 +231,12 @@ def _format_shots(shots: List[dict]) -> Tuple[str, str, str, str]:
     )
 
 
-# ==================== 节点 1：生成分镜 ====================
+# ==================== Node 1: Generate Storyboard ====================
 class JingyumaStoryboardNode:
     """
-    镜语马分镜生成节点
-    输入：小说文本 + API Key
-    输出：图像提示词、视频提示词、台词、原始 JSON
+    Jingyuma Storyboard Generation Node.
+    Input: novel text + API key.
+    Output: image prompts, video prompts, dialogues, raw JSON.
     """
 
     @classmethod
@@ -181,29 +246,29 @@ class JingyumaStoryboardNode:
                 "text": ("STRING", {
                     "multiline": True,
                     "default": "",
-                    "tooltip": "输入小说章节或剧本内容（最长 10000 字）",
+                    "tooltip": "Paste novel chapter or script (max 10000 characters)",
                 }),
                 "api_key": ("STRING", {
                     "default": "",
-                    "tooltip": "在 https://shotstory.cn 注册后获取的 API Key",
+                    "tooltip": "Get your API key at https://shotstory.cn",
                 }),
             },
             "optional": {
                 "mode": (["basic", "mood", "theme"], {
                     "default": "basic",
-                    "tooltip": "basic=快速（免费版可用）/ mood=情绪（需标准版）/ theme=题材（需专业版）",
+                    "tooltip": "basic = fast (free tier) / mood = emotion (Standard+) / theme = genre (Pro)",
                 }),
                 "mood": (MOOD_OPTIONS, {
-                    "default": "（不指定）",
-                    "tooltip": "仅在 mode=mood 时生效",
+                    "default": "(not set)",
+                    "tooltip": "Only used when mode = mood",
                 }),
                 "theme": (THEME_OPTIONS, {
-                    "default": "（自动检测）",
-                    "tooltip": "仅在 mode=theme 时生效；选『自动检测』则由服务端识别题材",
+                    "default": "(auto detect)",
+                    "tooltip": "Only used when mode = theme. '(auto detect)' lets the server detect the genre.",
                 }),
                 "use_cache": ("BOOLEAN", {
                     "default": True,
-                    "tooltip": "是否启用 10 分钟缓存（避免同一文本重复扣积分）",
+                    "tooltip": "Cache results for 10 minutes to avoid duplicate API charges",
                 }),
             },
         }
@@ -211,55 +276,53 @@ class JingyumaStoryboardNode:
     RETURN_TYPES = ("STRING", "STRING", "STRING", "STRING")
     RETURN_NAMES = ("image_prompts", "video_prompts", "dialogues", "raw_json")
     FUNCTION = "generate_storyboard"
-    CATEGORY = "镜语马"
+    CATEGORY = "Jingyuma"
 
     def generate_storyboard(self, text, api_key, mode="basic",
-                            mood="（不指定）", theme="（自动检测）", use_cache=True):
+                            mood="(not set)", theme="(auto detect)", use_cache=True):
         text = text.strip()
         api_key = api_key.strip()
 
-        # ===== 处理下拉框的"不指定"选项 =====
-        if mood in ("（不指定）", ""):
-            mood = ""
-        if theme in ("（自动检测）", ""):
-            theme = ""
+        # Map dropdown labels back to API values (Chinese)
+        mood = MOOD_MAP.get(mood, "")
+        theme = THEME_MAP.get(theme, "")
 
         if not text:
-            raise RuntimeError("❌ 输入文本为空")
+            raise RuntimeError("Input text is empty")
         if not api_key:
-            raise RuntimeError("❌ API Key 未填写，请前往 https://shotstory.cn 注册获取")
+            raise RuntimeError("API key is missing. Get yours at https://shotstory.cn")
         if len(text) > 10000:
-            raise RuntimeError(f"❌ 文本过长（{len(text)} 字），上限 10000 字")
+            raise RuntimeError(f"Text too long ({len(text)} chars). Max 10000 chars.")
 
-        # 缓存检查
+        # Cache check
         cache_key = _make_cache_key(text, mode, mood, theme)
         if use_cache:
             cached = _get_from_cache(cache_key)
             if cached is not None:
-                print(f"✅ [镜语马] 命中缓存，跳过 API 调用")
+                print("[Jingyuma] Cache hit, skipping API call")
                 return _format_shots(cached)
 
-        # 调用 API
-        print(f"🌐 [镜语马] 调用 API：mode={mode}, mood={mood}, theme={theme}, 文本长度={len(text)}")
+        # Call API
+        print(f"[Jingyuma] Calling API: mode={mode}, mood={mood}, theme={theme}, text_len={len(text)}")
         data = _call_generate_api(api_key, text, mode, mood, theme)
 
         shots = data.get("data", {}).get("shots", [])
         tokens_used = data.get("data", {}).get("tokens_used", 0)
         tokens_remaining = data.get("data", {}).get("tokens_remaining", 0)
-        print(f"✅ [镜语马] 生成成功：{len(shots)} 个镜头，消耗 {tokens_used} 积分，剩余 {tokens_remaining} 积分")
+        print(f"[Jingyuma] Success: {len(shots)} shots, used {tokens_used} credits, {tokens_remaining} remaining")
 
-        # 缓存结果
+        # Save to cache
         if use_cache:
             _save_to_cache(cache_key, shots)
 
         return _format_shots(shots)
 
 
-# ==================== 节点 2：拆分镜头 ====================
+# ==================== Node 2: Split Shots ====================
 class JingyumaSplitShotsNode:
     """
-    从生成的镜头字符串中提取第 N 个镜头的提示词
-    用于逐镜头精细控制生成
+    Extract the Nth shot's prompt from the generated shots string.
+    Useful for per-shot fine-grained generation.
     """
 
     @classmethod
@@ -270,13 +333,13 @@ class JingyumaSplitShotsNode:
                     "multiline": True,
                     "default": "",
                     "forceInput": True,
-                    "tooltip": "连接『镜语马·生成分镜』的 image_prompts 输出",
+                    "tooltip": "Connect to the 'image_prompts' output of 'Jingyuma Storyboard'",
                 }),
                 "shot_index": ("INT", {
                     "default": 1,
                     "min": 1,
                     "max": 9999,
-                    "tooltip": "要提取第几个镜头",
+                    "tooltip": "Which shot to extract",
                 }),
             },
         }
@@ -284,24 +347,24 @@ class JingyumaSplitShotsNode:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("prompt",)
     FUNCTION = "extract_shot"
-    CATEGORY = "镜语马"
+    CATEGORY = "Jingyuma"
 
     def extract_shot(self, prompts, shot_index):
         if not prompts:
             return ("",)
 
-        # 找到以 [镜头 NNN] 开头的行
-        target_prefix = f"[镜头 {shot_index:03d}]"
+        # Find the line starting with "[Shot NNN]"
+        target_prefix = f"[Shot {shot_index:03d}]"
         for line in prompts.split("\n"):
             if line.startswith(target_prefix):
                 return (line[len(target_prefix):].strip(),)
 
-        # 兜底：按行索引
+        # Fallback: index by line number
         lines = [l for l in prompts.split("\n") if l.strip()]
         if 0 <= shot_index - 1 < len(lines):
             line = lines[shot_index - 1]
-            # 去掉前缀
-            if line.startswith("[镜头"):
+            # Strip prefix
+            if line.startswith("[Shot"):
                 idx = line.find("]")
                 if idx != -1:
                     return (line[idx + 1:].strip(),)
@@ -310,11 +373,11 @@ class JingyumaSplitShotsNode:
         return ("",)
 
 
-# ==================== 节点 3：刷新单镜头 ====================
+# ==================== Node 3: Refresh Single Shot ====================
 class JingyumaRefreshShotNode:
     """
-    对单个镜头刷新不同版本的分镜描述
-    仅标准版/专业版套餐可用
+    Refresh a single shot's description with a different variant.
+    Available for Standard / Pro plans only.
     """
 
     @classmethod
@@ -324,23 +387,23 @@ class JingyumaRefreshShotNode:
                 "shot_text": ("STRING", {
                     "multiline": True,
                     "default": "",
-                    "tooltip": "要刷新的镜头原句（从 raw_json 中的 original_text 字段复制）",
+                    "tooltip": "Shot's original text (copy from the 'original_text' field in raw_json)",
                 }),
                 "api_key": ("STRING", {
                     "default": "",
-                    "tooltip": "镜语马 API Key",
+                    "tooltip": "Jingyuma API key",
                 }),
                 "mode": (["mood", "theme"], {
                     "default": "mood",
-                    "tooltip": "刷新必须指定 mood 或 theme，快速模式无刷新",
+                    "tooltip": "Refresh requires 'mood' or 'theme'. Fast mode (basic) has no refresh.",
                 }),
                 "mood": (MOOD_OPTIONS_REQUIRED, {
                     "default": MOOD_OPTIONS_REQUIRED[0],
-                    "tooltip": "仅在 mode=mood 时生效",
+                    "tooltip": "Only used when mode = mood",
                 }),
                 "theme": (THEME_OPTIONS_REQUIRED, {
                     "default": THEME_OPTIONS_REQUIRED[0],
-                    "tooltip": "仅在 mode=theme 时生效",
+                    "tooltip": "Only used when mode = theme",
                 }),
             },
         }
@@ -348,7 +411,7 @@ class JingyumaRefreshShotNode:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("new_prompt",)
     FUNCTION = "refresh_shot"
-    CATEGORY = "镜语马"
+    CATEGORY = "Jingyuma"
 
     def refresh_shot(self, shot_text, api_key, mode="mood",
                      mood=MOOD_OPTIONS_REQUIRED[0], theme=THEME_OPTIONS_REQUIRED[0]):
@@ -356,9 +419,9 @@ class JingyumaRefreshShotNode:
         api_key = api_key.strip()
 
         if not shot_text:
-            raise RuntimeError("❌ 镜头原句为空")
+            raise RuntimeError("Shot text is empty")
         if not api_key:
-            raise RuntimeError("❌ API Key 未填写")
+            raise RuntimeError("API key is missing")
 
         url = API_BASE_URL + ROTATE_ENDPOINT
         headers = {
@@ -366,30 +429,32 @@ class JingyumaRefreshShotNode:
             "X-API-Key": api_key,
             "User-Agent": "ComfyUI-JingyumaNode/1.0",
         }
-        payload = {"shot_text": shot_text, "mode": mode}
-        if mode == "mood" and mood:
-            payload["mood"] = mood
-        if mode == "theme" and theme:
-            payload["theme"] = theme
 
-        print(f"🌐 [镜语马] 刷新镜头：mode={mode}")
+        # Map dropdown labels back to API values
+        payload = {"shot_text": shot_text, "mode": mode}
+        if mode == "mood":
+            payload["mood"] = MOOD_MAP.get(mood, "")
+        if mode == "theme":
+            payload["theme"] = THEME_MAP.get(theme, "")
+
+        print(f"[Jingyuma] Refreshing shot: mode={mode}")
         try:
             resp = requests.post(url, headers=headers, json=payload, timeout=TIMEOUT)
         except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"❌ 请求失败：{e}")
+            raise RuntimeError(f"Request failed: {e}")
 
         if resp.status_code != 200:
             try:
                 err = resp.json().get("error", resp.text[:200])
             except Exception:
                 err = resp.text[:200]
-            raise RuntimeError(f"❌ 刷新失败 {resp.status_code}：{err}")
+            raise RuntimeError(f"Refresh failed {resp.status_code}: {err}")
 
         data = resp.json()
         if not data.get("success"):
             code = data.get("code", "")
-            raise RuntimeError(f"❌ 刷新失败[{code}]：{data.get('error', '未知错误')}")
+            raise RuntimeError(f"Refresh failed[{code}]: {data.get('error', 'Unknown error')}")
 
         visual = data.get("data", {}).get("visual", "")
-        print(f"✅ [镜语马] 刷新成功：{visual[:50]}...")
+        print(f"[Jingyuma] Refresh success: {visual[:50]}...")
         return (visual,)
